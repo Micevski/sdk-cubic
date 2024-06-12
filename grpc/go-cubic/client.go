@@ -49,6 +49,14 @@ type Client struct {
 // the provided address.  Transport security is enabled by default.  Use Options
 // to override default settings if necessary.
 func NewClient(addr string, opts ...Option) (*Client, error) {
+	return NewClientWithDialOptions(addr, []grpc.DialOption{}, opts...)
+}
+
+// NewClientWithDialOptions creates a new Client that connects to a Cubic Server listening on
+// the provided address.  Transport security is enabled by default.  Use Options
+// to override default settings if necessary.
+// Additionally this factory method enables the integration to provide external DialOptions
+func NewClientWithDialOptions(addr string, dialOpt []grpc.DialOption, opts ...Option) (*Client, error) {
 	c := Client{}
 	c.streamingBufSize = defaultStreamingBufsize
 	c.connectTimeout = defaultConnectTimeout
@@ -71,8 +79,12 @@ func NewClient(addr string, opts ...Option) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.connectTimeout)
 	defer cancel()
 
-	conn, err := grpc.DialContext(ctx, addr, dopt, grpc.WithBlock(),
-		grpc.WithReturnConnectionError(), grpc.FailOnNonTempDialError(true)) // these are both experimental but very useful.
+	dialOpt = append(dialOpt, dopt,
+		grpc.WithBlock(),
+		grpc.WithReturnConnectionError(),
+		grpc.FailOnNonTempDialError(true))
+
+	conn, err := grpc.DialContext(ctx, addr, dialOpt...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create a client: %v", err)
 	}
@@ -235,7 +247,8 @@ func (c *Client) CompileContext(
 func (c *Client) Recognize(
 	ctx context.Context,
 	cfg *cubicpb.RecognitionConfig,
-	audio io.Reader) (*cubicpb.RecognitionResponse, error) {
+	audio io.Reader,
+) (*cubicpb.RecognitionResponse, error) {
 	b, err := ioutil.ReadAll(audio)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read audio: %v", err)
@@ -273,9 +286,11 @@ type RecognitionResponseHandler func(*cubicpb.RecognitionResponse)
 //
 // This function returns only after all results have been passed to the
 // resultHandler.
-func (c *Client) StreamingRecognize(ctx context.Context,
+func (c *Client) StreamingRecognize(
+	ctx context.Context,
 	cfg *cubicpb.RecognitionConfig, audio io.Reader,
-	handlerFunc RecognitionResponseHandler) error {
+	handlerFunc RecognitionResponseHandler,
+) error {
 
 	stream, err := c.cubic.StreamingRecognize(ctx)
 	if err != nil {
@@ -334,9 +349,11 @@ func (c *Client) StreamingRecognize(ctx context.Context,
 }
 
 // sendaudio sends audio to a stream.
-func sendaudio(stream cubicpb.Cubic_StreamingRecognizeClient,
+func sendaudio(
+	stream cubicpb.Cubic_StreamingRecognizeClient,
 	cfg *cubicpb.RecognitionConfig, audio io.Reader,
-	bufsize uint32) error {
+	bufsize uint32,
+) error {
 
 	// The first message needs to be a config message, and all subsequent
 	// messages must be audio messages.
